@@ -24,14 +24,14 @@ class TestAssembler(unittest.TestCase):
         """)
         self.assertEqual(entry, 0x100)
         self.assertEqual(labels["value"], 0x103)
-        self.assertEqual(words[0x103:0x106] if False else [words[0x103], words[0x104], words[0x105]], [7, 255, 65])
+        self.assertEqual([words[0x103], words[0x104], words[0x105]], [7, 255, 65])
         self.assertEqual(labels["end"], labels["gap"] + 4)
         self.assertEqual([words[labels["name"]], words[labels["name"] + 2]], [104, 0])
 
     def test_forward_references_and_sums(self):
-        m = run("LDI r1, tail+1\nJMP over\ntail: .word 5\nover:")
-        self.assertEqual(m.reg[1], 5 + 0 if False else m.reg[1])
-        self.assertEqual(m.mem[m.reg[1] - 1], 5)
+        m = run("LDI r1, tail+1\nLDI r2, tail\nJMP over\ntail: .word 5\nover:")
+        self.assertEqual(m.reg[1], m.reg[2] + 1)
+        self.assertEqual(m.mem[m.reg[2]], 5)
 
     def test_equ_and_negative(self):
         m = run(".equ N, 40\nLDI r1, N+2\nLDI r2, -1")
@@ -105,7 +105,6 @@ class TestArithmetic(unittest.TestCase):
 
     def test_logic_and_shifts(self):
         m = run("LDI r1, 0xF0F0\nLDI r2, 0xFF00\nAND r1, r2\nLDI r3, 1\nSHL r3, 4\nLDI r4, 0x8000\nSAR r4, 3\nLDI r5, 0x8000\nSHR r5, 3\nLDI r6, 5\nNOT r6")
-        self.assertEqual(m.reg[1:7], [0xF000, 16, 0xF000, 0x1000, 0xFFFA, 0][:6] if False else m.reg[1:7])
         self.assertEqual((m.reg[1], m.reg[3], m.reg[4], m.reg[5], m.reg[6]), (0xF000, 16, 0xF000, 0x1000, 0xFFFA))
 
     def test_division(self):
@@ -161,7 +160,6 @@ class TestPrograms(unittest.TestCase):
         self.assertEqual([int(x) for x in m.text().split()], want)
 
     def test_bubble_sort(self):
-        data = [random.Random(5).randint(0, 999) for _ in range(1)]
         rng = random.Random(5)
         data = [rng.randint(0, 999) for _ in range(30)]
         src = f"""start:
@@ -238,13 +236,17 @@ class TestInterrupts(unittest.TestCase):
         self.assertEqual(m.reg[2], 5)
 
     def test_masked_interrupts_wait(self):
-        words, entry, _ = assemble("start: LDI r2, 0\nNOP\nNOP\nEI\nNOP\nHLT\nv: LDI r2, 1\nIRET")
+        words, entry, labels = assemble("start: LDI r2, 0\nNOP\nNOP\nEI\nNOP\nHLT\nv: LDI r2, 1\nIRET")
         m = Machine(words, entry)
-        m.mem[0xFF04] = next(a for a, w in words.items() if a > 5 and w == words[0]) if False else m.mem[0xFF04]
+        m.mem[0xFF04] = labels["v"]
         m.step()
         m.raise_interrupt(4)
         m.step()
-        self.assertEqual(m.pending, [4])
+        m.step()
+        self.assertEqual((m.pending, m.reg[2]), ([4], 0))      # still masked before EI
+        m.step()                                               # EI
+        m.step()                                               # taken before the next instruction runs
+        self.assertEqual((m.pending, m.reg[2]), ([], 1))
 
 
 class TestDebugger(unittest.TestCase):
